@@ -1,0 +1,70 @@
+name: Historical reconstruction pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      per_class:
+        description: "Number of q1 VALID examples per class (1-25)"
+        required: true
+        default: "1"
+        type: string
+  push:
+    branches:
+      - feat/issue-1-rug-radar-verified-risk
+    paths:
+      - ".github/workflows/historical-reconstruction-pilot.yml"
+      - "historical_reconstruction_pilot.py"
+      - "test_historical_reconstruction.py"
+      - "RADAR.md"
+
+concurrency:
+  group: historical-reconstruction-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run bounded reconstruction pilot
+        env:
+          HELIUS_RPC_URL: ${{ secrets.HELIUS_RPC_URL }}
+          PER_CLASS: ${{ inputs.per_class || '4' }}
+        run: |
+          if [ -z "$HELIUS_RPC_URL" ]; then
+            echo "::error::Configure the HELIUS_RPC_URL Actions secret."
+            exit 1
+          fi
+          python historical_reconstruction_pilot.py --per-class "$PER_CLASS"
+      - name: Export labeled feature rows for backtest
+        if: always()
+        run: |
+          if [ -f historical_reconstruction_pilot.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("historical_reconstruction_pilot.json").read_text())
+          rows = report.get("feature_rows", [])
+          Path("historical_features.jsonl").write_text(
+              "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows)
+          )
+          print(f"exported {len(rows)} reconstructed feature rows")
+          PY
+          fi
+      - name: Upload reconstruction report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-reconstruction-pilot
+          path: |
+            historical_reconstruction_pilot.json
+            historical_features.jsonl
+          if-no-files-found: ignore
+          retention-days: 14

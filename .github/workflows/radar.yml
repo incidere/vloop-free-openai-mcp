@@ -1,0 +1,21 @@
+name: SPL radar checks
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Syntax check
+        run: python -B -m py_compile spl_rug_radar.py solana_ingest.py backtest.py calibrated_scorer.py helius_history_probe.py historical_reconstruction_pilot.py
+      - name: Unit tests
+        run: python -B -m unittest discover -s . -v
+      - name: Enforce scorer size
+        run: python -B -c "from pathlib import Path; n=Path('spl_rug_radar.py').stat().st_size; print(f'{n} bytes'); assert n <= 8192"
+

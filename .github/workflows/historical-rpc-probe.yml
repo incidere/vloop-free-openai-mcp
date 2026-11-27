@@ -1,0 +1,61 @@
+name: Historical RPC capability probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      historical_slots:
+        description: "Comma-separated historical slots (up to 20)"
+        required: true
+        default: "382619204,303713493,232538996,163465783"
+        type: string
+      timeout_seconds:
+        description: "Per-request timeout in seconds"
+        required: true
+        default: "60"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate probe inputs
+        env:
+          SLOTS: ${{ inputs.historical_slots || '382619204,303713493,232538996,163465783' }}
+          TIMEOUT: ${{ inputs.timeout_seconds || '60' }}
+        run: |
+          python - <<'PY'
+          import os
+          slots = [x.strip() for x in os.environ["SLOTS"].split(",") if x.strip()]
+          assert 1 <= len(slots) <= 20, "Supply between 1 and 20 slots"
+          assert all(x.isdecimal() for x in slots), "Slots must be non-negative integers"
+          assert 1 <= int(os.environ["TIMEOUT"]) <= 180, "Timeout must be 1-180 seconds"
+          PY
+      - name: Probe historical RPC
+        env:
+          HELIUS_RPC_URL: ${{ secrets.HELIUS_RPC_URL }}
+          SLOTS: ${{ inputs.historical_slots || '382619204,303713493,232538996,163465783' }}
+          TIMEOUT: ${{ inputs.timeout_seconds || '60' }}
+        run: |
+          if [ -z "$HELIUS_RPC_URL" ]; then
+            echo "HELIUS_RPC_URL is not configured; probe skipped. Add the repository secret, then re-run this workflow."
+            exit 0
+          fi
+          python helius_history_probe.py --slots "$SLOTS" --timeout "$TIMEOUT"
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-rpc-probe
+          path: helius_history_probe.json
+          if-no-files-found: ignore
+          retention-days: 14
